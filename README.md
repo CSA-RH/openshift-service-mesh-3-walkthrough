@@ -89,7 +89,7 @@ After updating the endpoint you may see a **403 Forbidden** error. Grant the Kia
  
 ```bash
 oc adm policy add-cluster-role-to-user cluster-monitoring-view \
-  -z kiali-service-account -n istio-system
+  -z kiali-service-account -n kiali
 ```
 
 ## A. Sidecar mode
