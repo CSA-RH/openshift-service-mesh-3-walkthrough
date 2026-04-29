@@ -107,7 +107,7 @@ spec:
 EOF
 ```
 
-### A.1.2 Istio Control Plane
+#### A.1.2 Istio Control Plane
 
 ```bash
 # Create the control plane namespace and 
@@ -134,11 +134,11 @@ spec:
 EOF
 ```
 
-## A.2 Application deployment
+### A.2 Application deployment
 
 In sidecar mode, an Envoy proxy container is injected alongside each application container in a pod. Watch the container count change after enabling injection.
  
-### A.2.1 Deploy the Bookinfo Application
+#### A.2.1 Deploy the Bookinfo Application
 
 ```bash
 # Create the application namespace
@@ -194,7 +194,7 @@ curl -s http://details.bookinfo.svc:9080/details/0 | jq
 curl -s http://reviews.bookinfo.svc:9080/reviews/0 | jq
 ```
 
-### A.2.2 Enable Sidecar Injection
+#### A.2.2 Enable Sidecar Injection
  
 Label the namespace to enable both mesh discovery and automatic sidecar injection:
  
@@ -220,7 +220,7 @@ oc rollout restart deployments -n bookinfo
 oc get pod -n bookinfo -w
 ```
  
-### A.2.3 Configure Prometheus Scraping
+#### A.2.3 Configure Prometheus Scraping
  
 Once the 403 is resolved, you may notice that no metrics appear. This is because Prometheus has no `PodMonitor` configured to scrape the Envoy sidecar metrics endpoint (`/stats/prometheus`).
  
@@ -257,9 +257,9 @@ spec:
 EOF
 ```
  
-## A.3. Security and Networking
+### A.3. Security and Networking
  
-### A.3.1 Enforce mTLS
+#### A.3.1 Enforce mTLS
 
 Apply a `PeerAuthentication` policy to enforce mutual TLS (mTLS) for all workloads in the `bookinfo` namespace:
  
@@ -278,7 +278,7 @@ EOF
  
 > **Note:** Once STRICT mTLS is active, the direct `productpage` route created earlier will return a **502 Bad Gateway**, because the OpenShift Router cannot complete the mTLS handshake. An Istio Ingress Gateway is required — see Section 3.2.
  
-### A.3.2 Deploy the Ingress Gateway
+#### A.3.2 Deploy the Ingress Gateway
  
 Deploy the Envoy-based ingress gateway workload (Service, Deployment, RBAC):
  
@@ -312,7 +312,7 @@ spec:
 EOF
 ``` 
  
-### A.3.3 Inspect Certificate / SPIFFE Identity
+#### A.3.3 Inspect Certificate / SPIFFE Identity
  
 Use `istioctl` to inspect the certificate of any sidecar-injected pod:
  
@@ -325,7 +325,7 @@ istioctl proxy-config secret $POD_TO_INSPECT -n bookinfo -o json | \
   base64 --decode | openssl x509 -text -noout
 ```
  
-### A.3.4 Test with a Sleep Pod
+#### A.3.4 Test with a Sleep Pod
  
 Deploy a curl-based pod with sidecar injection enabled to test connectivity from within the mesh:
  
@@ -345,7 +345,7 @@ curl -I -X GET reviews:9080/reviews/0
 # Expected: HTTP 200 OK
 ```
  
-### A.3.5 Authorization Policy
+#### A.3.5 Authorization Policy
  
 Restrict access to the `reviews` service so that only `productpage` (identified by its SPIFFE/mTLS identity) is permitted:
  
@@ -369,7 +369,17 @@ EOF
 ```
  
 After applying this policy, the `sleep` pod should receive a **403 Forbidden** when attempting to reach `reviews`, while `productpage` continues to work normally.
- 
+
+### A.4. Cleanup
+
+```
+oc delete namespace bookinfo
+oc delete istio default -n istio-system
+oc delete istiocni default -n istio-cni
+oc delete namespace istio-system
+oc delete namespace istio-cni
+```
+
 ---
 
 ## B. Ambient mode
@@ -377,31 +387,48 @@ After applying this policy, the `sleep` pod should receive a **403 Forbidden** w
 >*NOTE*: https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-istio-ambient-mode
 We need to configure the cluster CNO. We need to make sure that the field Networks.operator.spec.defaultNetwork.ovnKubernetesConfig.gatewayConfig.routingViaHost is set to true. 
 
-We install the istio resource in ambient mode: 
+### B.1 Components installation
+
+For scoping the service mesh with discovery selector to limit the scope of the OSSM in Istio ambient mode. The configuration controls which namespaces the control plane discovers based on label selectors. 
+
+#### B.1.1. Install ZTunnel
 
 ```bash
 cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:  
+  name: istio-ztunnel
+spec: {}
+---
 apiVersion: sailoperator.io/v1
-kind: Istio
+kind: ZTunnel
 metadata:
   name: default
+  namespace: istio-ztunnel
+  labels:
+    istio-discovery: enabled
 spec:
-  namespace: istio-system
+  namespace: istio-ztunnel
   profile: ambient
-  values:
-    pilot:
-      trustedZtunnelNamespace: ztunnel
-  meshConfig:
-    discoverySelectors:
-    - matchLabels:
-        istio-discovery: enabled
 EOF
 ```
+
+#### B.1.2. Install Istio CNI plugin
 
 We install the Istio CNI in ambient mode as well
 
 ```bash
+# Create istio-cni project and IstioCNI
 cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:  
+  name: istio-cni
+  labels:
+    istio-discovery: enabled
+spec: {}
+---
 apiVersion: sailoperator.io/v1
 kind: IstioCNI
 metadata:
@@ -412,45 +439,57 @@ spec:
 EOF
 ```
 
-We create the ZTunnel (namespace istio-ztunnel will be better fit)
+#### B.1.3. Install Istio control plane
+
+We install the istio resource in ambient mode: 
 
 ```bash
-oc new-project ztunnel
 cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:  
+  name: istio-system
+  labels:
+    istio-discovery: enabled
+spec: {}
+---
 apiVersion: sailoperator.io/v1
-kind: ZTunnel
+kind: Istio
 metadata:
   name: default
 spec:
-  namespace: ztunnel
+  namespace: istio-system
   profile: ambient
+  values:
+    pilot:
+      trustedZtunnelNamespace: istio-ztunnel
+  meshConfig:
+    discoverySelectors:
+    - matchLabels:
+        istio-discovery: enabled
 EOF
 ```
 
-For scoping the service mesh with discovery selector to limit the scope of the OSSM in Istio ambient mode. The configuration controls which namespaces the control plane discovers based on label selectors. 
-
-We first add a label to the namespaces containing the control plane, the istio CNI and the Ztunnel
+## B.2 Deploy the bookinfo app
 
 ```bash
-oc label namespace istio-system istio-discovery=enabled
-oc label namespace istio-cni istio-discovery=enabled
-oc label namespace ztunnel istio-discovery=enabled
-```
-
-## Deploy bookinfo app
-
-```bash
-oc create namespace bookinfo
-oc label namespace bookinfo istio-discovery=enabled
-oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.26/samples/bookinfo/platform/kube/bookinfo.yaml
-oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.26/samples/bookinfo/platform/kube/bookinfo-versions.yaml
+cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:  
+  name: bookinfo
+  labels:
+    istio-discovery: enabled
+spec: {}
+EOF
+oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.24/samples/bookinfo/platform/kube/bookinfo.yaml
+oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.24/samples/bookinfo/platform/kube/bookinfo-versions.yaml
 ```
 
 Confirm that Ztunnel proxy has successfully opened listening sockets in the pod network namespace by running the following command:
 
 ```bash
-
-istioctl ztunnel-config workloads --namespace ztunnel
+istioctl ztunnel-config workloads --namespace istio-ztunnel
 ```
 
 Install the Gateway
@@ -482,7 +521,7 @@ oc label namespace bookinfo istio.io/use-waypoint=waypoint
 Check enrollment
 
 ```bash
-istioctl ztunnel-config svc --namespace ztunnel
+istioctl ztunnel-config svc --namespace istio-ztunnel
 ```
 
 For scrapping the metrics 
@@ -493,7 +532,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: ztunnel-monitor
-  namespace: ztunnel
+  namespace: istio-ztunnel
 spec:
   selector:
     matchLabels:
@@ -518,6 +557,7 @@ spec:
     interval: 15s
 EOF
 ```
+### B.3. Security and Networking
 
 We can expose the app via a Gateway (k8s): 
 
@@ -622,9 +662,29 @@ spec:
 EOF
 ```
 
-Now a cURL from the web terminal will not succeed. We can explore, then, the gateway logs: 
+Now a cURL from the web terminal will not succeed. 
+
+```bash
+# Now, we get an error
+curl http://details.bookinfo.svc:9080/details/0 
+```
+
+We can explore, then, the gateway logs: 
 
 ```bash
 # Will show the blocked request after applying the PeerAuthorization CRD at namespace level.  
 oc logs -n ztunnel -l app=ztunnel -c istio-proxy --tail=100 | grep details
+```
+
+
+### B.4. Cleanup
+
+```
+oc delete istio default -n istio-system
+oc delete istiocni default -n istio-cni
+oc delete ztunnel 
+oc delete namespace bookinfo
+oc delete namespace istio-system
+oc delete namespace istio-cni
+oc delete namespace istio-ztunnel
 ```
