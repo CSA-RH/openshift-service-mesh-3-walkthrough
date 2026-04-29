@@ -33,6 +33,8 @@ export PATH=$PATH:~/istioctl-linux-amd64
  
 Create a default Kiali instance from the OperatorHub-installed Kiali Operator in the `kiali` namespace.
 
+Firstly, create the namespace. 
+
 ```bash
 cat <<EOF | oc apply -f -
 apiVersion: v1
@@ -42,6 +44,8 @@ metadata:
 spec: {}
 EOF
 ```
+
+Secondly, create the Kiali instance, directly from the `Ecosystem / Installed` Operators menu option. Accept all the defaults. 
 
 >**NOTE**: If you postpone Kiali configuration until after the application is deployed, you can observe exactly what each step does in real-time. Application monitoring will fail in various ways until all Kiali components and RBAC permissions are correctly configured.
 
