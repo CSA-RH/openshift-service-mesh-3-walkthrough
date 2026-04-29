@@ -699,7 +699,7 @@ We can explore, then, the gateway logs:
 
 ```bash
 # Will show the blocked request after applying the PeerAuthorization CRD at namespace level.  
-oc logs -n ztunnel -l app=ztunnel -c istio-proxy --tail=100 | grep details
+oc logs -n istio-ztunnel -l app=ztunnel -c istio-proxy --tail=100 | grep details
 ```
 
 
