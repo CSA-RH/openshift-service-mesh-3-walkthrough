@@ -680,9 +680,9 @@ oc logs -n ztunnel -l app=ztunnel -c istio-proxy --tail=100 | grep details
 ### B.4. Cleanup
 
 ```
-oc delete istio default -n istio-system
-oc delete istiocni default -n istio-cni
-oc delete ztunnel 
+oc delete istio default
+oc delete istiocni default
+oc delete ztunnel default
 oc delete namespace bookinfo
 oc delete namespace istio-system
 oc delete namespace istio-cni
