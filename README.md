@@ -1,14 +1,104 @@
 # OpenShift Service Mesh 3.3: Sidecar and Ambient Mode Walkthrough
 
-This guide covers the installation of Red Hat OpenShift Service Mesh 3.3 (via the Sail Operator), Kiali, and demonstrates both traditional Sidecar injection and the new Ambient mesh architecture.
+This guide covers the installation of Red Hat OpenShift Service Mesh 3.3 (via the Sail Operator), Kiali, and demonstrates both traditional Sidecar injection and the new Ambient mesh architecture with the bookinfo application from the Istio project.
 
-## 1. Install the Core Components 
+## Installation
 
 ### Prerequisites
 
-Install the Sail Operator and Kiali Operator via the OpenShift OperatorHub before proceeding.
+Install the **OpenShift Service Mesh 3.3 Operator** and the **Kiali Operator** via the OpenShift OperatorHub before proceeding. Additionally, we will need: 
 
-### 1.1 Install Istio CNI plugin 
+- An OpenShift cluster with cluster-admin privileges
+- The `oc` CLI installed and logged in
+- The `istioctl` CLI (installation steps included below)
+
+>*NOTE*: The scripts provided here have been executed in an OpenShift Web Terminal, available via the installation of the **Web Terminal** operator
+
+### Install and Configure `istioctl`
+ 
+Obtain the download URL from the OpenShift Console or the OSSM documentation, then:
+ 
+```bash
+# Download the AMD64 binary
+curl -L -O <DOWNLOAD_URL>
+ 
+# Extract the archive
+tar xzvf <FILENAME>.tar.gz
+ 
+# Add to PATH (Web Terminal, trasient state)
+export PATH=$PATH:~/istioctl-linux-amd64
+```
+
+### Kiali instance
+ 
+Create a default Kiali instance from the OperatorHub-installed Kiali Operator in the `kiali` namespace.
+
+Firstly, create the namespace. 
+
+```bash
+cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:  
+  name: kiali
+spec: {}
+EOF
+```
+
+Secondly, create the Kiali instance, directly from the `Ecosystem / Installed` Operators menu option. Accept all the defaults. 
+
+>**NOTE**: If you postpone Kiali configuration until after the application is deployed, you can observe exactly what each step does in real-time. Application monitoring will fail in various ways until all Kiali components and RBAC permissions are correctly configured.
+
+ 
+### Enable User Workload Monitoring
+ 
+> **Reference:** https://docs.redhat.com/en/documentation/monitoring_stack_for_red_hat_openshift/4.20/html/configuring_user_workload_monitoring/preparing-to-configure-the-monitoring-stack-uwm#configurable-monitoring-components_preparing-to-configure-the-monitoring-stack-uwm
+ 
+```bash
+cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-monitoring-config
+  namespace: openshift-monitoring
+data:
+  config.yaml: |
+    enableUserWorkload: true
+EOF
+```
+
+Verify that the user workload Prometheus and Alertmanager pods are running in `openshift-user-workload-monitoring`.
+
+### Point Kiali to Thanos Querier
+ 
+Edit the Kiali CR to configure the Prometheus endpoint:
+ 
+```yaml
+spec:
+  external_services:
+    prometheus:
+      url: "https://thanos-querier.openshift-monitoring.svc:9091"
+      auth:
+        type: "bearer"
+        use_kiali_token: true
+```
+ 
+### Fix 403 Error — Grant Kiali Monitoring Access
+ 
+After updating the endpoint you may see a **403 Forbidden** error. Grant the Kiali service account the required cluster role:
+ 
+```bash
+oc adm policy add-cluster-role-to-user cluster-monitoring-view \
+  -z kiali-service-account -n kiali
+```
+
+## A. Sidecar mode
+
+> **Reference:** https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-sidecar-injection
+
+### A.1 Components installation 
+
+#### A.1.1 Install Istio CNI plugin 
 
 The CNI plugin handles network configuration for sidecar injection at the node level.
 
@@ -31,7 +121,7 @@ spec:
 EOF
 ```
 
-### 1.2 Istio Control Plane
+#### A.1.2 Istio Control Plane
 
 ```bash
 # Create the control plane namespace and 
@@ -58,13 +148,11 @@ spec:
 EOF
 ```
 
-## 2. Sidecar mode
+### A.2 Application deployment
 
-> **Reference:** https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-sidecar-injection
- 
 In sidecar mode, an Envoy proxy container is injected alongside each application container in a pod. Watch the container count change after enabling injection.
  
-### 2.1 Deploy the Bookinfo Application
+#### A.2.1 Deploy the Bookinfo Application
 
 ```bash
 # Create the application namespace
@@ -120,7 +208,7 @@ curl -s http://details.bookinfo.svc:9080/details/0 | jq
 curl -s http://reviews.bookinfo.svc:9080/reviews/0 | jq
 ```
 
-### 2.2 Enable Sidecar Injection
+#### A.2.2 Enable Sidecar Injection
  
 Label the namespace to enable both mesh discovery and automatic sidecar injection:
  
@@ -146,55 +234,7 @@ oc rollout restart deployments -n bookinfo
 oc get pod -n bookinfo -w
 ```
  
-### 2.3 Kiali
- 
-Create a default Kiali instance from the OperatorHub-installed Kiali Operator. Once the instance is running, navigate to the **bookinfo** namespace in the Kiali UI.
- 
-> **Note:** You will initially see a metrics error — Kiali cannot reach Prometheus. Follow the steps below to resolve this.
- 
-### 2.4 Enable User Workload Monitoring
- 
-> **Reference:** https://docs.redhat.com/en/documentation/monitoring_stack_for_red_hat_openshift/4.20/html/configuring_user_workload_monitoring/preparing-to-configure-the-monitoring-stack-uwm#configurable-monitoring-components_preparing-to-configure-the-monitoring-stack-uwm
- 
-```bash
-cat <<EOF | oc apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cluster-monitoring-config
-  namespace: openshift-monitoring
-data:
-  config.yaml: |
-    enableUserWorkload: true
-EOF
-```
-
-Verify that the user workload Prometheus and Alertmanager pods are running in `openshift-user-workload-monitoring`.
-
-### 2.5 Point Kiali to Thanos Querier
- 
-Edit the Kiali CR to configure the Prometheus endpoint:
- 
-```yaml
-spec:
-  external_services:
-    prometheus:
-      url: "https://thanos-querier.openshift-monitoring.svc:9091"
-      auth:
-        type: "bearer"
-        use_kiali_token: true
-```
- 
-#### Fix 403 Error — Grant Kiali Monitoring Access
- 
-After updating the endpoint you may see a **403 Forbidden** error. Grant the Kiali service account the required cluster role:
- 
-```bash
-oc adm policy add-cluster-role-to-user cluster-monitoring-view \
-  -z kiali-service-account -n istio-system
-```
-
-### 2.6 Configure Prometheus Scraping
+#### A.2.3 Configure Prometheus Scraping
  
 Once the 403 is resolved, you may notice that no metrics appear. This is because Prometheus has no `PodMonitor` configured to scrape the Envoy sidecar metrics endpoint (`/stats/prometheus`).
  
@@ -231,11 +271,9 @@ spec:
 EOF
 ```
  
----
+### A.3. Security and Networking
  
-## 3. Security
- 
-### 3.1 Enforce mTLS
+#### A.3.1 Enforce mTLS
 
 Apply a `PeerAuthentication` policy to enforce mutual TLS (mTLS) for all workloads in the `bookinfo` namespace:
  
@@ -254,7 +292,7 @@ EOF
  
 > **Note:** Once STRICT mTLS is active, the direct `productpage` route created earlier will return a **502 Bad Gateway**, because the OpenShift Router cannot complete the mTLS handshake. An Istio Ingress Gateway is required — see Section 3.2.
  
-### 3.2 Deploy the Ingress Gateway
+#### A.3.2 Deploy the Ingress Gateway
  
 Deploy the Envoy-based ingress gateway workload (Service, Deployment, RBAC):
  
@@ -286,24 +324,9 @@ spec:
     kind: Service
     name: istio-ingressgateway
 EOF
-```
+``` 
  
-### 3.3 Install and Configure `istioctl`
- 
-Obtain the download URL from the OpenShift Console or the OSSM documentation, then:
- 
-```bash
-# Download the AMD64 binary
-curl -L -O <DOWNLOAD_URL>
- 
-# Extract the archive
-tar xzvf <FILENAME>.tar.gz
- 
-# Add to PATH
-export PATH=$PATH:~/istioctl-linux-amd64
-```
- 
-### 3.4 Inspect Certificate / SPIFFE Identity
+#### A.3.3 Inspect Certificate / SPIFFE Identity
  
 Use `istioctl` to inspect the certificate of any sidecar-injected pod:
  
@@ -316,7 +339,7 @@ istioctl proxy-config secret $POD_TO_INSPECT -n bookinfo -o json | \
   base64 --decode | openssl x509 -text -noout
 ```
  
-### 3.5 Test with a Sleep Pod
+#### A.3.4 Test with a Sleep Pod
  
 Deploy a curl-based pod with sidecar injection enabled to test connectivity from within the mesh:
  
@@ -336,7 +359,7 @@ curl -I -X GET reviews:9080/reviews/0
 # Expected: HTTP 200 OK
 ```
  
-### 3.6 Authorization Policy
+#### A.3.5 Authorization Policy
  
 Restrict access to the `reviews` service so that only `productpage` (identified by its SPIFFE/mTLS identity) is permitted:
  
@@ -360,39 +383,66 @@ EOF
 ```
  
 After applying this policy, the `sleep` pod should receive a **403 Forbidden** when attempting to reach `reviews`, while `productpage` continues to work normally.
- 
+
+### A.4. Cleanup
+
+```
+oc delete namespace bookinfo
+oc delete istio default -n istio-system
+oc delete istiocni default -n istio-cni
+oc delete namespace istio-system
+oc delete namespace istio-cni
+```
+
 ---
 
+## B. Ambient mode
 
-# Ambient mode
->NOTE: https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-istio-ambient-mode
+>*NOTE*: https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-istio-ambient-mode
 We need to configure the cluster CNO. We need to make sure that the field Networks.operator.spec.defaultNetwork.ovnKubernetesConfig.gatewayConfig.routingViaHost is set to true. 
 
-We install the istio resource in ambient mode: 
+### B.1 Components installation
+
+For scoping the service mesh with discovery selector to limit the scope of the OSSM in Istio ambient mode. The configuration controls which namespaces the control plane discovers based on label selectors. 
+
+#### B.1.1. Install ZTunnel
 
 ```bash
 cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:  
+  name: istio-ztunnel
+spec: {}
+---
 apiVersion: sailoperator.io/v1
-kind: Istio
+kind: ZTunnel
 metadata:
   name: default
+  namespace: istio-ztunnel
+  labels:
+    istio-discovery: enabled
 spec:
-  namespace: istio-system
+  namespace: istio-ztunnel
   profile: ambient
-  values:
-    pilot:
-      trustedZtunnelNamespace: ztunnel
-  meshConfig:
-    discoverySelectors:
-    - matchLabels:
-        istio-discovery: enabled
 EOF
 ```
+
+#### B.1.2. Install Istio CNI plugin
 
 We install the Istio CNI in ambient mode as well
 
 ```bash
+# Create istio-cni project and IstioCNI
 cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:  
+  name: istio-cni
+  labels:
+    istio-discovery: enabled
+spec: {}
+---
 apiVersion: sailoperator.io/v1
 kind: IstioCNI
 metadata:
@@ -403,45 +453,58 @@ spec:
 EOF
 ```
 
-We create the ZTunnel (namespace istio-ztunnel will be better fit)
+#### B.1.3. Install Istio control plane
+
+We install the istio resource in ambient mode: 
 
 ```bash
-oc new-project ztunnel
 cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:  
+  name: istio-system
+  labels:
+    istio-discovery: enabled
+spec: {}
+---
 apiVersion: sailoperator.io/v1
-kind: ZTunnel
+kind: Istio
 metadata:
   name: default
 spec:
-  namespace: ztunnel
+  namespace: istio-system
   profile: ambient
+  values:
+    pilot:
+      trustedZtunnelNamespace: istio-ztunnel
+  meshConfig:
+    discoverySelectors:
+    - matchLabels:
+        istio-discovery: enabled
 EOF
 ```
 
-For scoping the service mesh with discovery selector to limit the scope of the OSSM in Istio ambient mode. The configuration controls which namespaces the control plane discovers based on label selectors. 
-
-We first add a label to the namespaces containing the control plane, the istio CNI and the Ztunnel
+## B.2 Deploy the bookinfo app
 
 ```bash
-oc label namespace istio-system istio-discovery=enabled
-oc label namespace istio-cni istio-discovery=enabled
-oc label namespace ztunnel istio-discovery=enabled
-```
-
-## Deploy bookinfo app
-
-```bash
-oc create namespace bookinfo
-oc label namespace bookinfo istio-discovery=enabled
-oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.26/samples/bookinfo/platform/kube/bookinfo.yaml
-oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.26/samples/bookinfo/platform/kube/bookinfo-versions.yaml
+cat <<EOF | oc apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:  
+  name: bookinfo
+  labels:
+    istio-discovery: enabled
+    istio.io/dataplane-mode: ambient
+spec: {}
+EOF
+oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.24/samples/bookinfo/platform/kube/bookinfo.yaml
+oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.24/samples/bookinfo/platform/kube/bookinfo-versions.yaml
 ```
 
 Confirm that Ztunnel proxy has successfully opened listening sockets in the pod network namespace by running the following command:
 
 ```bash
-
-istioctl ztunnel-config workloads --namespace ztunnel
+istioctl ztunnel-config workloads --namespace istio-ztunnel
 ```
 
 Install the Gateway
@@ -473,7 +536,7 @@ oc label namespace bookinfo istio.io/use-waypoint=waypoint
 Check enrollment
 
 ```bash
-istioctl ztunnel-config svc --namespace ztunnel
+istioctl ztunnel-config svc --namespace istio-ztunnel
 ```
 
 For scrapping the metrics 
@@ -484,7 +547,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: ztunnel-monitor
-  namespace: ztunnel
+  namespace: istio-ztunnel
 spec:
   selector:
     matchLabels:
@@ -509,6 +572,7 @@ spec:
     interval: 15s
 EOF
 ```
+### B.3. Security and Networking
 
 We can expose the app via a Gateway (k8s): 
 
@@ -598,6 +662,18 @@ We check that we can reach the pod from outside the mesh (Web Terminal, for inst
 curl http://details.bookinfo.svc:9080/details/0 
 ```
 
+At this point, if we didn't restart the pods, the new ip/nftables are not handled by the Ambient mode, so we won't see anything in the Kiali Graph view. If we perform an application restart and generate some traffic, we will able to see it. 
+
+Restart all workloads so the sidecars are injected, then watch the pods come back up:
+ 
+```bash
+# Trigger a rolling restart
+oc rollout restart deployments -n bookinfo
+ 
+# Watch pods — you should see 2 containers per pod (app + istio-proxy)
+oc get pod -n bookinfo -w
+```
+
 We apply the PeerAuthentication CRD to enable mTLS at namespace level
 
 ```bash
@@ -613,9 +689,29 @@ spec:
 EOF
 ```
 
-Now a cURL from the web terminal will not succeed. We can explore, then, the gateway logs: 
+Now a cURL from the web terminal will not succeed. 
+
+```bash
+# Now, we get an error
+curl http://details.bookinfo.svc:9080/details/0 
+```
+
+We can explore, then, the gateway logs: 
 
 ```bash
 # Will show the blocked request after applying the PeerAuthorization CRD at namespace level.  
-oc logs -n ztunnel -l app=ztunnel -c istio-proxy --tail=100 | grep details
+oc logs -n istio-ztunnel -l app=ztunnel -c istio-proxy --tail=100 | grep details
+```
+
+
+### B.4. Cleanup
+
+```
+oc delete istio default
+oc delete istiocni default
+oc delete ztunnel default
+oc delete namespace bookinfo
+oc delete namespace istio-system
+oc delete namespace istio-cni
+oc delete namespace istio-ztunnel
 ```
