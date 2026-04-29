@@ -494,6 +494,7 @@ metadata:
   name: bookinfo
   labels:
     istio-discovery: enabled
+    istio.io/dataplane-mode: ambient
 spec: {}
 EOF
 oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.24/samples/bookinfo/platform/kube/bookinfo.yaml
