@@ -661,6 +661,18 @@ We check that we can reach the pod from outside the mesh (Web Terminal, for inst
 curl http://details.bookinfo.svc:9080/details/0 
 ```
 
+At this point, if we didn't restart the pods, the new ip/nftables are not handled by the Ambient mode, so we won't see anything in the Kiali Graph view. If we perform an application restart and generate some traffic, we will able to see it. 
+
+Restart all workloads so the sidecars are injected, then watch the pods come back up:
+ 
+```bash
+# Trigger a rolling restart
+oc rollout restart deployments -n bookinfo
+ 
+# Watch pods — you should see 2 containers per pod (app + istio-proxy)
+oc get pod -n bookinfo -w
+```
+
 We apply the PeerAuthentication CRD to enable mTLS at namespace level
 
 ```bash
