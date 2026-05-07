@@ -388,8 +388,8 @@ After applying this policy, the `sleep` pod should receive a **403 Forbidden** w
 
 ```
 oc delete namespace bookinfo
-oc delete istio default -n istio-system
-oc delete istiocni default -n istio-cni
+oc delete istio default
+oc delete istiocni default
 oc delete namespace istio-system
 oc delete namespace istio-cni
 ```
