@@ -2,6 +2,27 @@
 
 This guide covers the installation of Red Hat OpenShift Service Mesh 3.3 (via the Sail Operator), Kiali, and demonstrates both traditional Sidecar injection and the new Ambient mesh architecture with the bookinfo application from the Istio project.
 
+```mermaid
+graph LR
+    subgraph "What is a Service Mesh?"
+        A[Service A] -->|plain HTTP| B[Service B]
+    end
+    subgraph "With Service Mesh"
+        C[Service A] -->|mTLS + policy| D[Proxy Layer] -->|mTLS + policy| E[Service B]
+    end
+```
+
+A **service mesh** is an infrastructure layer that transparently adds **encryption (mTLS)**, **observability (metrics, traces)**, and **traffic control (routing, authorization)** to service-to-service communication — without modifying application code.
+
+OpenShift Service Mesh 3.3 offers two data-plane architectures:
+
+| | **Sidecar Mode** | **Ambient Mode** |
+|---|---|---|
+| Proxy location | One Envoy per pod (injected container) | Shared ztunnel (per-node) + optional waypoint (per-namespace) |
+| Resource overhead | Higher (memory/CPU per pod) | Lower (shared infrastructure) |
+| L7 policy | Always available | Only when waypoint is deployed |
+| Pod restart required | Yes (to inject sidecar) | No (transparent enrollment) |
+
 ## Installation
 
 ### Prerequisites
@@ -17,6 +38,10 @@ Install the **OpenShift Service Mesh 3.3 Operator** and the **Kiali Operator** v
 
 
 ### Install and Configure `istioctl`
+
+> **What:** Install the `istioctl` CLI binary on your workstation or Web Terminal.
+>
+> **Why:** `istioctl` lets you inspect proxy configurations, view certificates, debug connectivity issues, and check ztunnel state — capabilities not available through `oc` alone.
 
 Obtain the download URL from the OpenShift Console or the OSSM documentation, then:
 
@@ -46,6 +71,10 @@ client version: 1.28.5
 
 
 ### Kiali instance
+
+> **What:** Deploy Kiali — the observability console for OpenShift Service Mesh.
+>
+> **Why:** Kiali provides a real-time topology graph of your services, showing traffic flow, error rates, and latency. It queries Prometheus metrics exposed by the mesh proxies (Envoy sidecars or ztunnel) and visualises them. Without Kiali, you'd need to craft PromQL queries manually.
 
 Create a default Kiali instance from the OperatorHub-installed Kiali Operator in the `kiali` namespace.
 
@@ -107,6 +136,10 @@ kiali-kiali.apps.<cluster-domain>
 
 ### Enable User Workload Monitoring
 
+> **What:** Enable OpenShift's built-in Prometheus stack for user namespaces.
+>
+> **Why:** By default, OpenShift only monitors platform components (`openshift-*` namespaces). The mesh proxies expose metrics in your application namespace, so you need user workload monitoring turned on for Prometheus to scrape them and for Kiali to display traffic data.
+
 > **Reference:** [https://docs.redhat.com/en/documentation/monitoring_stack_for_red_hat_openshift/4.20/html/configuring_user_workload_monitoring/preparing-to-configure-the-monitoring-stack-uwm#configurable-monitoring-components_preparing-to-configure-the-monitoring-stack-uwm](https://docs.redhat.com/en/documentation/monitoring_stack_for_red_hat_openshift/4.20/html/configuring_user_workload_monitoring/preparing-to-configure-the-monitoring-stack-uwm#configurable-monitoring-components_preparing-to-configure-the-monitoring-stack-uwm)
 
 ```bash
@@ -142,6 +175,17 @@ thanos-ruler-user-workload-1           4/4     Running   0          XXs
 
 ### Point Kiali to Thanos Querier
 
+> **What:** Configure Kiali to query metrics from Thanos Querier (the unified Prometheus endpoint in OpenShift).
+>
+> **Why:** OpenShift aggregates all Prometheus data through Thanos Querier. Kiali needs to know where to find this endpoint and how to authenticate (using its own ServiceAccount token). Without this, the Kiali dashboard shows "No metrics available".
+
+```mermaid
+graph LR
+    E[Envoy / ztunnel] -->|/metrics| P[Prometheus<br>user-workload]
+    P --> T[Thanos Querier<br>:9091]
+    T --> K[Kiali<br>dashboard]
+```
+
 Patch the Kiali CR (`kiali` instance in the `kiali` namespace) to point at the in-cluster Thanos Querier endpoint:
 
 ```bash
@@ -171,6 +215,10 @@ https://thanos-querier.openshift-monitoring.svc:9091
 
 
 ### Fix 403 Error — Grant Kiali Monitoring Access
+
+> **What:** Grant the Kiali ServiceAccount the `cluster-monitoring-view` ClusterRole.
+>
+> **Why:** Thanos Querier is protected by RBAC. Even though Kiali knows the endpoint, its ServiceAccount token will get a 403 unless it has explicit permission to read cluster-wide monitoring data. This is an OpenShift security boundary — platform metrics aren't exposed to arbitrary workloads by default.
 
 After updating the endpoint you may see a **403 Forbidden** error. Grant the Kiali service account the required cluster role:
 
@@ -203,7 +251,16 @@ cluster-monitoring-view-xxxxx   ClusterRole/cluster-monitoring-view   ...   kial
 
 > **Reference:** [https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-sidecar-injection](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-sidecar-injection)
 
+In sidecar mode, every application pod gets an **Envoy proxy** injected as an additional container. All inbound and outbound traffic for the pod flows through this proxy, which handles mTLS, metrics collection, and policy enforcement transparently.
 
+```mermaid
+graph TD
+    subgraph "Pod (with sidecar)"
+        App[App Container<br>e.g. productpage] <-->|localhost| Proxy[Envoy Sidecar<br>istio-proxy]
+    end
+    Proxy <-->|"mTLS (SPIFFE)"| Network[Cluster Network]
+    CP[istiod<br>Control Plane] -->|"xDS config<br>+ certificates"| Proxy
+```
 
 ### A.1 Components installation
 
@@ -211,7 +268,17 @@ cluster-monitoring-view-xxxxx   ClusterRole/cluster-monitoring-view   ...   kial
 
 #### A.1.1 Install Istio CNI plugin
 
-The CNI plugin handles network configuration for sidecar injection at the node level.
+> **What:** Deploy the Istio CNI DaemonSet — one pod per node that configures network rules.
+>
+> **Why:** On OpenShift, pods run with restricted security contexts and cannot modify their own iptables. The CNI plugin runs as a privileged DaemonSet and sets up the network redirection rules (iptables/nftables) at pod creation time, so the sidecar can intercept traffic without the application needing elevated permissions.
+
+```mermaid
+graph LR
+    subgraph Node
+        CNI[istio-cni-node<br>DaemonSet] -->|"configures iptables<br>at pod creation"| Pod[New Pod]
+        Pod --> Sidecar[istio-proxy<br>intercepts traffic]
+    end
+```
 
 ```bash
 # Create istio-cni project
@@ -260,6 +327,15 @@ istio-cni-node-xxxxx   1/1     Running   0          XXs
 
 
 #### A.1.2 Istio Control Plane
+
+> **What:** Deploy `istiod` — the Istio control plane that manages the entire mesh.
+>
+> **Why:** istiod is the "brain" of the mesh. It:
+> - Issues short-lived mTLS certificates (SPIFFE identities) to every proxy
+> - Pushes routing rules, policies, and service discovery info via the xDS API
+> - Watches only namespaces labelled `istio-discovery: enabled` (discovery selector), keeping the blast radius controlled
+>
+> Without istiod, the proxies have no configuration and no certificates.
 
 ```bash
 # Create the control plane namespace and 
@@ -313,10 +389,19 @@ istiod-xxxxx-xxxxx        1/1     Running   0          XXs
 
 ### A.2 Application deployment
 
-In sidecar mode, an Envoy proxy container is injected alongside each application container in a pod. Watch the container count change after enabling injection.
- 
-
 #### A.2.1 Deploy the Bookinfo Application
+
+> **What:** Deploy the Istio Bookinfo sample application — a polyglot microservices app with 4 services (productpage, details, reviews, ratings).
+>
+> **Why:** We deploy it first *without* the mesh to establish a baseline. You'll see each pod has exactly 1 container. After enabling sidecar injection, the count jumps to 2 — proving the proxy was injected transparently without changing the application manifests.
+
+```mermaid
+graph LR
+    User([User]) --> PP[productpage<br>Python]
+    PP --> D[details<br>Ruby]
+    PP --> R[reviews<br>Java]
+    R --> Ra[ratings<br>Node.js]
+```
 
 ```bash
 # Create the application namespace
@@ -396,6 +481,10 @@ curl -s http://reviews.bookinfo.svc:9080/reviews/0 | jq
 
 #### A.2.2 Enable Sidecar Injection
 
+> **What:** Label the namespace with `istio-injection: enabled` and restart the pods.
+>
+> **Why:** The Istio mutating admission webhook watches for pods being created in labelled namespaces and automatically injects the `istio-proxy` container. Existing pods need a restart because injection only happens at pod creation time. After this step, all inter-service communication is automatically proxied through Envoy — enabling mTLS, metrics, and policy enforcement.
+
 Label the namespace to enable both mesh discovery and automatic sidecar injection:
 
 ```bash
@@ -452,7 +541,9 @@ reviews-v3-xxxxx-xxxxx            true,true    reviews,istio-proxy
 
 #### A.2.3 Configure Prometheus Scraping
 
-Once the 403 is resolved, you may notice that no metrics appear. This is because Prometheus has no `PodMonitor` configured to scrape the Envoy sidecar metrics endpoint (`/stats/prometheus`).
+> **What:** Create a `PodMonitor` that tells Prometheus to scrape the Envoy proxy metrics endpoint.
+>
+> **Why:** Each Envoy sidecar exposes detailed L7 metrics (request count, latency histograms, error rates) on `/stats/prometheus`. However, Prometheus won't scrape them unless you explicitly create a `PodMonitor` resource. Without this, Kiali's traffic graph remains empty even though everything else is working — a common "gotcha" during setup.
 
 Create a `PodMonitor` for all sidecar-injected pods in the `bookinfo` namespace:
 
@@ -514,9 +605,19 @@ Running
 
 ### A.3. Security and Networking
 
-
-
 #### A.3.1 Enforce mTLS
+
+> **What:** Apply a `PeerAuthentication` policy with `mode: STRICT` to require mutual TLS for all traffic in the namespace.
+>
+> **Why:** By default, Istio uses "permissive" mTLS — it accepts both plaintext and encrypted connections. Setting STRICT means **only** clients with a valid mesh certificate (SPIFFE identity) can communicate with services in this namespace. This is the foundation of zero-trust networking: every connection is authenticated and encrypted, even inside the cluster.
+
+```mermaid
+graph LR
+    subgraph "STRICT mTLS"
+        A[Pod A<br>with sidecar] -->|"✅ mTLS<br>SPIFFE cert"| B[Pod B<br>with sidecar]
+        C[External client<br>no cert] -->|"❌ Rejected<br>502 Bad Gateway"| B
+    end
+```
 
 Apply a `PeerAuthentication` policy to enforce mutual TLS (mTLS) for all workloads in the `bookinfo` namespace:
 
@@ -565,6 +666,17 @@ Expected output:
 
 
 #### A.3.2 Deploy the Ingress Gateway
+
+> **What:** Deploy an Envoy-based Ingress Gateway as the entry point for external traffic into the mesh.
+>
+> **Why:** With STRICT mTLS enabled, the OpenShift Router can no longer reach the pods directly (it doesn't have a mesh certificate). The Ingress Gateway sits at the mesh edge: it terminates external TLS from the Router and initiates mTLS towards the backend pods. It's the "front door" that bridges the external world and the encrypted mesh.
+
+```mermaid
+graph LR
+    User([User]) -->|HTTPS| Router[OpenShift<br>Router]
+    Router -->|"edge TLS<br>terminated"| GW[Istio Ingress<br>Gateway]
+    GW -->|"mTLS<br>(SPIFFE)"| PP[productpage<br>+ sidecar]
+```
 
 Deploy the Envoy-based ingress gateway workload (Service, Deployment, RBAC):
 
@@ -637,6 +749,10 @@ Expected output:
 
 #### A.3.3 Inspect Certificate / SPIFFE Identity
 
+> **What:** Extract and examine the X.509 certificate that istiod issued to a sidecar proxy.
+>
+> **Why:** Every proxy gets a short-lived certificate with a SPIFFE URI (`spiffe://cluster.local/ns/<namespace>/sa/<service-account>`) as its identity. This is what makes identity-based authorization possible — policies reference these URIs, not IP addresses. Inspecting the cert proves that the identity system is working and shows you the exact identity string to use in AuthorizationPolicies.
+
 Use `istioctl` to inspect the certificate of any sidecar-injected pod:
 
 ```bash
@@ -660,6 +776,10 @@ X509v3 Subject Alternative Name: critical
 
 
 #### A.3.4 Test with a Sleep Pod
+
+> **What:** Deploy a minimal curl pod *inside* the mesh (with sidecar) to test service-to-service connectivity.
+>
+> **Why:** Since STRICT mTLS is active, you can't test from outside the mesh anymore. The sleep pod gets its own SPIFFE identity and can make authenticated mTLS calls to other services. This lets you verify that mesh-internal connectivity works before adding authorization restrictions.
 
 Deploy a curl-based pod with sidecar injection enabled to test connectivity from within the mesh:
 
@@ -706,6 +826,16 @@ Expected output:
 
 
 #### A.3.5 Authorization Policy
+
+> **What:** Create an `AuthorizationPolicy` that only allows `productpage` (by its SPIFFE identity) to call the `reviews` service.
+>
+> **Why:** This is zero-trust in action. Even though `sleep` and `productpage` are both in the mesh with valid certificates, only the explicitly allowed identity can reach `reviews`. Every other caller gets a 403 Forbidden. This is a powerful security primitive: access is based on cryptographic identity, not network location or IP addresses.
+
+```mermaid
+graph LR
+    PP[productpage<br>sa/bookinfo-productpage] -->|"✅ ALLOW"| R[reviews]
+    S[sleep<br>sa/default] -->|"❌ 403 Forbidden"| R
+```
 
 Restrict access to the `reviews` service so that only `productpage` (identified by its SPIFFE/mTLS identity) is permitted:
 
@@ -785,9 +915,40 @@ oc delete namespace istio-cni
 
 ## B. Ambient mode
 
+Ambient mode is a fundamentally different architecture from sidecar mode. Instead of injecting a proxy into every pod, it uses **shared infrastructure** at the node level:
 
+- **ztunnel** (per-node DaemonSet): Handles L4 concerns — mTLS encryption, connection-level telemetry, and basic authorization. All pods on the node share this component.
+- **Waypoint proxy** (per-namespace, optional): Handles L7 concerns — HTTP routing, request-level metrics, and L7 authorization policies. Only deployed when you need it.
+
+```mermaid
+graph TD
+    subgraph Node 1
+        direction TB
+        ZT1[ztunnel<br>L4 mTLS] --- P1[Pod A<br>no sidecar]
+        ZT1 --- P2[Pod B<br>no sidecar]
+    end
+    subgraph Node 2
+        direction TB
+        ZT2[ztunnel<br>L4 mTLS] --- P3[Pod C<br>no sidecar]
+    end
+    ZT1 <-->|"HBONE tunnel<br>(mTLS over HTTP/2)"| ZT2
+    subgraph "Namespace waypoint (optional)"
+        WP[Waypoint Proxy<br>L7 policies + metrics]
+    end
+    ZT1 -->|"L7 traffic via HBONE"| WP
+    WP -->|"forward to destination"| ZT2
+    CP[istiod] -->|xDS config| ZT1
+    CP -->|xDS config| ZT2
+    CP -->|xDS config| WP
+```
+
+The key advantage: **pods don't need to be restarted** to join the mesh. Labelling the namespace is enough, and ztunnel picks up traffic transparently.
 
 ### B.0 Prerequisites — Configure Cluster Networking
+
+> **What:** Enable `routingViaHost` in the OVN-Kubernetes network plugin configuration.
+>
+> **Why:** Ambient mode's ztunnel runs on the host network namespace and intercepts pod traffic using nftables rules. For this interception to work, pod egress traffic must be routed through the host network stack (rather than being bridged directly). This is a cluster-wide change that affects how OVN-Kubernetes handles the default gateway for pods.
 
 > **Reference:** [https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-istio-ambient-mode](https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-istio-ambient-mode)
 
@@ -837,6 +998,10 @@ For scoping the service mesh with discovery selector to limit the scope of the O
 
 #### B.1.1. Install ZTunnel
 
+> **What:** Deploy the ztunnel DaemonSet — a lightweight, Rust-based L4 proxy that runs on every node.
+>
+> **Why:** ztunnel is the core data-plane component in ambient mode. It transparently intercepts all TCP traffic from enrolled pods and wraps it in mTLS (using the HBONE protocol — HTTP/2-based tunneling). Unlike Envoy sidecars, ztunnel only handles L4 (connection-level) concerns, making it significantly lighter on resources.
+
 ```bash
 cat <<EOF | oc apply -f -
 apiVersion: v1
@@ -865,6 +1030,10 @@ The validation steps for step B.1.1 we should do after step B.1.3
 
 
 #### B.1.2. Install Istio CNI plugin
+
+> **What:** Install the Istio CNI plugin with the `ambient` profile.
+>
+> **Why:** In ambient mode, the CNI plugin configures nftables rules that redirect pod traffic to the ztunnel process on the node. This is different from sidecar mode where it sets up iptables for the sidecar — here it redirects to the node-level ztunnel instead. Without it, pod traffic bypasses the mesh entirely.
 
 We install the Istio CNI in ambient mode as well
 
@@ -917,6 +1086,10 @@ istio-cni-node-xxxxx   1/1     Running   0          XXs
 
 
 #### B.1.3. Install Istio control plane
+
+> **What:** Deploy istiod with the `ambient` profile and configure it to trust the ztunnel namespace.
+>
+> **Why:** istiod in ambient mode has additional responsibilities compared to sidecar mode: it provisions certificates for ztunnel (not individual pods), manages waypoint proxy configurations, and coordinates the HBONE tunnel setup. The `trustedZtunnelNamespace` tells istiod which namespace hosts the ztunnel DaemonSet it should trust for certificate requests.
 
 We install the istio resource in ambient mode: 
 
@@ -999,6 +1172,10 @@ ztunnel-xxxxx     1/1     Running   0          XXs
 
 ## B.2 Deploy the bookinfo app
 
+> **What:** Deploy the same Bookinfo app, but this time enrol the namespace into ambient mode via the `istio.io/dataplane-mode: ambient` label.
+>
+> **Why:** Unlike sidecar mode, you don't need to restart pods or inject containers. The moment the namespace is labelled, ztunnel begins intercepting traffic for all pods in it. Notice the pods still show 1/1 containers — no sidecar is injected. The mesh is completely transparent at the infrastructure level.
+
 ```bash
 cat <<EOF | oc apply -f -
 apiVersion: v1
@@ -1065,7 +1242,24 @@ bookinfo    reviews-v1-xxxxx-xxxxx            10.x.x.x    worker-1              
 
 
 
-Install the Gateway
+#### Install the Waypoint Proxy
+
+> **What:** Deploy a waypoint proxy (an Envoy instance managed via the Kubernetes Gateway API) and enrol the namespace to route traffic through it.
+>
+> **Why:** ztunnel only handles L4 (TCP-level) — it can encrypt traffic and enforce connection-level policies, but it cannot inspect HTTP headers, route by path, or collect L7 metrics. The waypoint proxy adds L7 capabilities (HTTP routing, request-level authorization, detailed metrics) for services that need it. It's a **shared** Envoy instance for the namespace, not one per pod.
+
+```mermaid
+graph LR
+    subgraph "Ambient L4 only (ztunnel)"
+        A[Pod A] -->|mTLS| ZT[ztunnel]
+        ZT -->|mTLS| B[Pod B]
+    end
+    subgraph "Ambient L4 + L7 (with waypoint)"
+        C[Pod C] -->|mTLS| ZT2[ztunnel]
+        ZT2 -->|HBONE| WP[Waypoint<br>L7 policy + metrics]
+        WP -->|mTLS| D[Pod D]
+    end
+```
 
 ```bash
 cat <<EOF | oc apply -f -
@@ -1133,7 +1327,11 @@ bookinfo    reviews        10.x.x.x      10.x.x.x:15008   HBONE
 
 
 
-For scrapping the metrics 
+#### Configure Metrics Scraping
+
+> **What:** Create `PodMonitor` resources for both ztunnel and the waypoint proxy.
+>
+> **Why:** In ambient mode, metrics are split across two components: ztunnel emits L4 connection metrics (bytes sent/received, connection duration) and the waypoint emits L7 request metrics (HTTP status codes, latency). Both need their own PodMonitor so Prometheus scrapes them and Kiali can render the complete traffic graph.
 
 ```bash
 cat <<EOF | oc apply -f - 
@@ -1194,6 +1392,20 @@ waypoint-monitor    XXs
 
 
 ### B.3. Security and Networking
+
+#### Expose the Application via Kubernetes Gateway API
+
+> **What:** Create a Kubernetes Gateway (using `gatewayClassName: istio`) and an HTTPRoute to expose the bookinfo app externally.
+>
+> **Why:** In ambient mode, we use the standard **Kubernetes Gateway API** (rather than Istio's older `Gateway`/`VirtualService` CRDs). This is a more portable, upstream-first approach. The `istio` gatewayClassName tells the Sail Operator to spin up an Envoy pod that acts as the ingress. We then create an OpenShift Route to bridge external HTTPS traffic to this gateway.
+
+```mermaid
+graph LR
+    User([User]) -->|HTTPS| Router[OpenShift<br>Router]
+    Router -->|"edge TLS<br>terminated"| GW["K8s Gateway<br>(Envoy pod)"]
+    GW -->|"HTTPRoute<br>/productpage"| PP[productpage]
+    PP -.->|"via ztunnel + waypoint"| Reviews[reviews]
+```
 
 We can expose the app via a Gateway (k8s): 
 
@@ -1345,9 +1557,13 @@ We check that we can reach the pod from outside the mesh (Web Terminal, for inst
 curl http://details.bookinfo.svc:9080/details/0 
 ```
 
-At this point, if we didn't restart the pods, the new ip/nftables are not handled by the Ambient mode, so we won't see anything in the Kiali Graph view. If we perform an application restart and generate some traffic, we will able to see it. 
+#### Restart Pods for nftables Enrollment
 
-Restart all workloads so the sidecars are injected, then watch the pods come back up:
+> **What:** Perform a rolling restart of all deployments and generate traffic.
+>
+> **Why:** If the pods were created *before* the ambient label was applied to the namespace, the CNI plugin hasn't yet configured the nftables interception rules for those pods. A restart triggers the CNI plugin to set up the rules at pod creation time. After this, traffic flows through ztunnel and appears in Kiali.
+
+Restart all workloads so the nftables rules are applied, then watch the pods come back up:
 
 ```bash
 # Trigger a rolling restart
@@ -1377,7 +1593,11 @@ for i in $(seq 1 5); do curl -sk https://$(oc get route main -n bookinfo -o json
 
 
 
-We apply the PeerAuthentication CRD to enable mTLS at namespace level
+#### Enforce mTLS in Ambient Mode
+
+> **What:** Apply `PeerAuthentication` with STRICT mode — same CRD as sidecar mode.
+>
+> **Why:** This demonstrates that the same security policies work across both architectures. In ambient mode, ztunnel enforces the STRICT requirement: any connection that doesn't present a valid mesh identity is rejected at the L4 level. Clients outside the mesh (like the Web Terminal pod) will see their connections immediately reset because ztunnel drops them before they reach the application.
 
 ```bash
 cat <<EOF | oc apply -f -
