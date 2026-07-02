@@ -740,8 +740,47 @@ oc delete namespace istio-cni
 
 ## B. Ambient mode
 
->*NOTE*: https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-istio-ambient-mode
-We need to configure the cluster CNO. We need to make sure that the field Networks.operator.spec.defaultNetwork.ovnKubernetesConfig.gatewayConfig.routingViaHost is set to true. 
+### B.0 Prerequisites — Configure Cluster Networking
+
+> **Reference:** https://docs.redhat.com/en/documentation/red_hat_openshift_service_mesh/3.3/html-single/installing/index#ossm-istio-ambient-mode
+
+Ambient mode requires that OVN-Kubernetes routes traffic via the host. Patch the cluster Network Operator to enable `routingViaHost`:
+
+```bash
+oc patch network.operator cluster --type=merge -p '
+spec:
+  defaultNetwork:
+    ovnKubernetesConfig:
+      gatewayConfig:
+        routingViaHost: true
+'
+```
+
+> **Note:** This change triggers a rolling reboot of the cluster nodes. Wait for all nodes to return to `Ready` before proceeding.
+
+<details>
+<summary>✅ Validation</summary>
+
+```bash
+oc get network.operator cluster -o jsonpath='{.spec.defaultNetwork.ovnKubernetesConfig.gatewayConfig.routingViaHost}'
+```
+
+Expected output:
+```
+true
+```
+
+Confirm all nodes are back to Ready:
+```bash
+oc get nodes -o custom-columns="NAME:.metadata.name,STATUS:.status.conditions[-1].type,READY:.status.conditions[-1].status" | grep -v "True"
+```
+
+Expected output (no nodes should appear — all are Ready):
+```
+NAME    STATUS   READY
+```
+
+</details>
 
 ### B.1 Components installation
 
