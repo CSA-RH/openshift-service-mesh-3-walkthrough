@@ -126,9 +126,10 @@ thanos-ruler-user-workload-1           4/4     Running   0          XXs
 
 ### Point Kiali to Thanos Querier
  
-Edit the Kiali CR to configure the Prometheus endpoint:
+Patch the Kiali CR (`kiali` instance in the `kiali` namespace) to point at the in-cluster Thanos Querier endpoint:
  
-```yaml
+```bash
+oc patch kiali kiali -n kiali --type=merge -p '
 spec:
   external_services:
     prometheus:
@@ -136,6 +137,7 @@ spec:
       auth:
         type: "bearer"
         use_kiali_token: true
+'
 ```
 
 <details>
