@@ -2,16 +2,6 @@
 
 This guide covers the installation of Red Hat OpenShift Service Mesh 3.3 (via the Sail Operator), Kiali, and demonstrates both traditional Sidecar injection and the new Ambient mesh architecture with the bookinfo application from the Istio project.
 
-```mermaid
-graph LR
-    subgraph "What is a Service Mesh?"
-        A[Service A] -->|plain HTTP| B[Service B]
-    end
-    subgraph "With Service Mesh"
-        C[Service A] -->|mTLS + policy| D[Proxy Layer] -->|mTLS + policy| E[Service B]
-    end
-```
-
 A **service mesh** is an infrastructure layer that transparently adds **encryption (mTLS)**, **observability (metrics, traces)**, and **traffic control (routing, authorization)** to service-to-service communication — without modifying application code.
 
 OpenShift Service Mesh 3.3 offers two data-plane architectures:
