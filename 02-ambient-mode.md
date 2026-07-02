@@ -51,7 +51,8 @@ spec:
 
 > **Note:** This change triggers a rolling reboot of the cluster nodes. Wait for all nodes to return to `Ready` before proceeding.
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get network.operator cluster -o jsonpath='{.spec.defaultNetwork.ovnKubernetesConfig.gatewayConfig.routingViaHost}'
@@ -75,7 +76,7 @@ Expected output (no nodes should appear — all are Ready):
 NAME    STATUS   READY
 ```
 
-
+</details>
 
 ## B.1 Components installation
 
@@ -108,11 +109,12 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 The validation steps for step B.1.1 we should do after step B.1.3
 
-
+</details>
 
 ### B.1.2. Install Istio CNI plugin
 
@@ -143,7 +145,8 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get istiocni default -o jsonpath='{.status.state}'
@@ -168,7 +171,7 @@ istio-cni-node-xxxxx   1/1     Running   0          XXs
 ...
 ```
 
-
+</details>
 
 ### B.1.3. Install Istio control plane
 
@@ -205,7 +208,8 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get istio default -o jsonpath='{.status.state}'
@@ -253,7 +257,7 @@ ztunnel-xxxxx     1/1     Running   0          XXs
 ...
 ```
 
-
+</details>
 
 ## B.2 Deploy the bookinfo app
 
@@ -276,7 +280,8 @@ oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh
 oc apply -n bookinfo -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.24/samples/bookinfo/platform/kube/bookinfo-versions.yaml
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get pods -n bookinfo
@@ -304,7 +309,7 @@ Expected output (should contain the ambient label):
 bookinfo   Active   XXs   istio-discovery=enabled,istio.io/dataplane-mode=ambient,...
 ```
 
-
+</details>
 
 Confirm that Ztunnel proxy has successfully opened listening sockets in the pod network namespace by running the following command:
 
@@ -312,7 +317,8 @@ Confirm that Ztunnel proxy has successfully opened listening sockets in the pod 
 istioctl ztunnel-config workloads --namespace istio-ztunnel
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 The output should list all bookinfo workloads with their IP addresses and `PROTOCOL: HBONE`:
 
@@ -325,7 +331,7 @@ bookinfo    reviews-v1-xxxxx-xxxxx            10.x.x.x    worker-1              
 ...
 ```
 
-
+</details>
 
 ### Install the Waypoint Proxy
 
@@ -370,7 +376,8 @@ Enroll the bookinfo namespace to use the waypoint
 oc label namespace bookinfo istio.io/use-waypoint=waypoint
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get gateway waypoint -n bookinfo -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}'
@@ -410,7 +417,7 @@ bookinfo    reviews        10.x.x.x      10.x.x.x:15008   HBONE
 ...
 ```
 
-
+</details>
 
 ### Configure Metrics Scraping
 
@@ -450,7 +457,8 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get podmonitor -n istio-ztunnel
@@ -474,7 +482,7 @@ NAME                AGE
 waypoint-monitor    XXs
 ```
 
-
+</details>
 
 ## B.3. Security and Networking
 
@@ -516,7 +524,8 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get gateway bookinfo-ingress-gateway -n bookinfo -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}'
@@ -539,7 +548,7 @@ NAME                                              READY   STATUS    RESTARTS   A
 bookinfo-ingress-gateway-istio-xxxxx-xxxxx        1/1     Running   0          XXs
 ```
 
-
+</details>
 
 After the gateway is deployed, we will see the envoy proxy that has been spinned up by the previous CRD (gatewayClassName istio). We can now create an HTTPRoute object that will inject the traffic into the mesh
 
@@ -598,7 +607,8 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get httproute -n bookinfo
@@ -633,7 +643,7 @@ Expected output:
 <title>Simple Bookstore App</title>
 ```
 
-
+</details>
 
 We check that we can reach the pod from outside the mesh (Web Terminal, for instance) 
 
@@ -658,7 +668,8 @@ oc rollout restart deployments -n bookinfo
 oc get pod -n bookinfo -w
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get pods -n bookinfo -l app=productpage -o jsonpath='{.items[0].status.phase}'
@@ -676,7 +687,7 @@ Generate some traffic and verify Kiali can see the graph:
 for i in $(seq 1 5); do curl -sk https://$(oc get route main -n bookinfo -o jsonpath='{.spec.host}')/productpage > /dev/null; done
 ```
 
-
+</details>
 
 ### Enforce mTLS in Ambient Mode
 
@@ -711,7 +722,8 @@ We can explore, then, the gateway logs:
 oc logs -n istio-ztunnel -l app=ztunnel -c istio-proxy --tail=100 | grep details
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get peerauthentication -n bookinfo
@@ -748,7 +760,7 @@ Expected output (should show denied/blocked entries):
 ... inbound connection from ... denied ...
 ```
 
-
+</details>
 
 ## B.4. Cleanup
 

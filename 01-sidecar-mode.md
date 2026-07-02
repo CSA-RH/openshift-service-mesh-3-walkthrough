@@ -50,7 +50,8 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get istiocni default -o jsonpath='{.status.state}'
@@ -75,7 +76,7 @@ istio-cni-node-xxxxx   1/1     Running   0          XXs
 ...
 ```
 
-
+</details>
 
 ### A.1.2 Istio Control Plane
 
@@ -113,7 +114,8 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get istio default -o jsonpath='{.status.state}'
@@ -136,7 +138,7 @@ NAME                      READY   STATUS    RESTARTS   AGE
 istiod-xxxxx-xxxxx        1/1     Running   0          XXs
 ```
 
-
+</details>
 
 ## A.2 Application deployment
 
@@ -168,7 +170,8 @@ EOF
 oc apply -f https://raw.githubusercontent.com/openshift-service-mesh/istio/release-1.24/samples/bookinfo/platform/kube/bookinfo.yaml -n bookinfo
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get pods -n bookinfo
@@ -191,6 +194,9 @@ reviews-v3-xxxxx-xxxxx            1/1     Running   0          XXs
 Optionally, expose the app directly to verify it works before mesh injection:
 
 ```bash
+
+</details>
+
 # Expose the productpage deployment
 oc expose deployment/productpage -n bookinfo
  
@@ -260,7 +266,8 @@ oc rollout restart deployments -n bookinfo
 oc get pod -n bookinfo -w
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get namespace bookinfo --show-labels | grep istio
@@ -288,7 +295,7 @@ reviews-v2-xxxxx-xxxxx            true,true    reviews,istio-proxy
 reviews-v3-xxxxx-xxxxx            true,true    reviews,istio-proxy
 ```
 
-
+</details>
 
 ### A.2.3 Configure Prometheus Scraping
 
@@ -329,7 +336,8 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get podmonitor -n bookinfo
@@ -352,7 +360,7 @@ Expected output (Prometheus is running and will pick up the new PodMonitor):
 Running
 ```
 
-
+</details>
 
 ## A.3. Security and Networking
 
@@ -385,7 +393,8 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get peerauthentication -n bookinfo
@@ -414,7 +423,7 @@ Expected output:
 
 > **Note:** Once STRICT mTLS is active, the direct `productpage` route created earlier will return a **502 Bad Gateway**, because the OpenShift Router cannot complete the mTLS handshake. An Istio Ingress Gateway is required — see Section 3.2.
 
-
+</details>
 
 ### A.3.2 Deploy the Ingress Gateway
 
@@ -461,7 +470,8 @@ spec:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get pods -n bookinfo -l istio=ingressgateway
@@ -496,7 +506,7 @@ Expected output:
 <title>Simple Bookstore App</title>
 ```
 
-
+</details>
 
 ### A.3.3 Inspect Certificate / SPIFFE Identity
 
@@ -515,7 +525,8 @@ istioctl proxy-config secret $POD_TO_INSPECT -n bookinfo -o json | \
   base64 --decode | openssl x509 -text -noout
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 The certificate output should contain a SPIFFE URI in the Subject Alternative Name:
 
@@ -524,7 +535,7 @@ X509v3 Subject Alternative Name: critical
     URI:spiffe://cluster.local/ns/bookinfo/sa/<service-account-name>
 ```
 
-
+</details>
 
 ### A.3.4 Test with a Sleep Pod
 
@@ -550,7 +561,8 @@ curl -I -X GET reviews:9080/reviews/0
 # Expected: HTTP 200 OK
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get pod sleep -n bookinfo -o jsonpath='{.status.containerStatuses[*].name}'
@@ -574,7 +586,7 @@ Expected output:
 200
 ```
 
-
+</details>
 
 ### A.3.5 Authorization Policy
 
@@ -611,7 +623,8 @@ EOF
 
 After applying this policy, the `sleep` pod should receive a **403 Forbidden** when attempting to reach `reviews`, while `productpage` continues to work normally.
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get authorizationpolicy -n bookinfo
@@ -648,7 +661,7 @@ Expected output:
 <title>Simple Bookstore App</title>
 ```
 
-
+</details>
 
 ## A.4. Cleanup
 

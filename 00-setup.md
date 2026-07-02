@@ -44,7 +44,8 @@ tar xzvf <FILENAME>.tar.gz
 export PATH=$PATH:~/istioctl-linux-amd64
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 istioctl version --short
@@ -56,7 +57,7 @@ Expected output:
 client version: 1.28.5
 ```
 
-
+</details>
 
 ## Kiali instance
 
@@ -143,7 +144,8 @@ data:
 EOF
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get pods -n openshift-user-workload-monitoring
@@ -159,7 +161,7 @@ thanos-ruler-user-workload-0           4/4     Running   0          XXs
 thanos-ruler-user-workload-1           4/4     Running   0          XXs
 ```
 
-
+</details>
 
 ## Point Kiali to Thanos Querier
 
@@ -188,7 +190,8 @@ spec:
 '
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc get kiali kiali -n kiali -o jsonpath='{.spec.external_services.prometheus.url}'
@@ -200,7 +203,7 @@ Expected output:
 https://thanos-querier.openshift-monitoring.svc:9091
 ```
 
-
+</details>
 
 ## Fix 403 Error — Grant Kiali Monitoring Access
 
@@ -215,7 +218,8 @@ oc adm policy add-cluster-role-to-user cluster-monitoring-view \
   -z kiali-service-account -n kiali
 ```
 
-✅ Validation
+<details>
+<summary>✅ Validation</summary>
 
 ```bash
 oc adm policy who-can get pods --subresource=prometheus-metrics -n openshift-monitoring | grep kiali-service-account
@@ -232,3 +236,5 @@ Expected output (should show the `cluster-monitoring-view` binding):
 ```
 cluster-monitoring-view-xxxxx   ClusterRole/cluster-monitoring-view   ...   kiali/kiali-service-account
 ```
+
+</details>
